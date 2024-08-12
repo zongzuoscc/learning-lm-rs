@@ -1,3 +1,5 @@
+use std::{borrow::BorrowMut, f32::consts::SQRT_2};
+
 use crate::tensor::Tensor;
 
 // get (row) vectors from a 2D table given a list of indices
@@ -71,25 +73,55 @@ pub fn masked_softmax(y: &mut Tensor<f32>) {
 }
 
 pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: f32) {
-    todo!("实现 rms_norm，计算前做一些必要的检查会帮助你后续调试")
+    let y_data=unsafe {
+        y.data_mut()
+    };
+
+    let shape=x.shape();
+    for i in 0..shape[0] {
+        let row_range = i*shape[1]..(i+1)*shape[1];
+        let sq = ((x.data()[row_range.clone()]
+            .iter()
+            .map(|&x| x.powi(2))
+            .sum::<f32>()/shape[1] as f32)+epsilon).sqrt();
+        y_data[row_range.clone()].iter_mut()
+        .zip(x.data()[row_range].iter().zip(w.data().iter())).for_each(
+            |(y_d,(x_d,w_d,))|{
+                *y_d = (*w_d * *x_d )/ sq;
+            }
+        );
+    }
 }
 
 // y = sigmoid(x) * x * y
 // hint: this is an element-wise operation
 pub fn silu(y: &mut Tensor<f32>, x: &Tensor<f32>) {
-    // let len = y.size();
-    // assert!(len == x.size());
+    let len = y.size();
+    assert!(len == x.size());
 
-    // let _y = unsafe { y.data_mut() };
-    // let _x = x.data();
-
-    todo!("实现 silu，这里给了一些前期准备工作的提示，你可以参考")
+    let y_data = unsafe { y.data_mut() };
+    let x_data = x.data();
+    for i in 0..x_data.len()  {
+        y_data[i]=y_data[i] *x_data[i]/ (1.0 + (-x_data[i]).exp())
+    }
 }
 
 // C = beta * C + alpha * A @ B^T
 // hint: You don't need to do an explicit transpose of B
 pub fn matmul_transb(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor<f32>, alpha: f32) {
-    todo!("实现 matmul_transb，计算前做一些必要的检查会帮助你后续调试");
+    // 默认当二维数组处理
+    let shape = c.shape().clone();
+    let mid=a.shape()[1];
+    let c_data=unsafe { c.data_mut() };
+    let mut offset=0;
+    for i in 0..shape[0]  {
+        let row=&a.data()[i*mid..(i+1)*mid];
+        for j in 0..shape[1] {
+            let column=&b.data()[j*mid..(j+1)*mid];
+            c_data[offset]=alpha*row.iter().zip(column).map(|(a,b)|a*b).sum::<f32>()+c_data[offset]*beta;
+            offset+=1;
+        }
+    }
 }
 
 // Dot product of two tensors (treated as vectors)

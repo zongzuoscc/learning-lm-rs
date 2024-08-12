@@ -1,12 +1,14 @@
+use std::borrow::BorrowMut;
+use std::cell::RefCell;
 use std::fs::File;
 use std::vec;
 
 use crate::config::LlamaConfigJson;
 use crate::kvcache::KVCache;
-use crate::operators as OP;
+use crate::operators::{self as OP, matmul_transb, rms_norm,silu};
 use crate::params::LLamaParams;
 use crate::tensor::Tensor;
-use safetensors::SafeTensors;
+use safetensors::{tensor, SafeTensors};
 use std::path::Path;
 pub struct Llama<T> {
     vocab: usize,           // vocab size
@@ -153,21 +155,44 @@ fn self_attention(
     total_seq_len: usize,
     dqkv: usize,
 ) {
+    
+
     todo!("Implement self_attention");
 }
 
 fn mlp(
-    residual: &mut Tensor<f32>,
-    hidden_states: &mut Tensor<f32>,
-    gate: &mut Tensor<f32>,
-    up: &mut Tensor<f32>,
-    w_up: &Tensor<f32>,
-    w_down: &Tensor<f32>,
-    w_gate: &Tensor<f32>,
-    rms_w: &Tensor<f32>,
+    residual: &mut Tensor<f32>, // 4 2
+    hidden_states: &mut Tensor<f32>, //4 2
+    gate: &mut Tensor<f32>, //4 3
+    up: &mut Tensor<f32>,// 4,3
+    w_up: &Tensor<f32>,// 3,2
+    w_down: &Tensor<f32>,// 2.3
+    w_gate: &Tensor<f32>, // 3,2
+    rms_w: &Tensor<f32>, // 2
     eps: f32,
 ) {
-    todo!("Implement mlp");
+    rms_norm(hidden_states,residual, rms_w, eps);
+    matmul_transb(gate, 0., hidden_states, w_gate, 1.0);
+    matmul_transb(up, 0., hidden_states, w_up, 1.0);
+    //  hidden = gate * sigmoid(gate) * up ## silu
+    let mut tmp_data=vec![0.; gate.shape().iter().product()];
+    {
+        // todo!
+        let (gate_data,up_data)=(gate.data(),up.data());
+        // 这里形状改变了！！变成4*3
+        for i in 0..tmp_data.len()  {
+            tmp_data[i]=gate_data[i] *up_data[i] / (1.0 + (-gate_data[i]).exp());
+        }
+    }
+    // 4*3
+    let tmp_hidden=Tensor::new(tmp_data,gate.shape());
+    matmul_transb(hidden_states, 0., &tmp_hidden, w_down, 1.0);
+    unsafe {
+        residual.data_mut().iter_mut().zip(hidden_states.data().iter()).for_each(|(rd,hd)|{
+            *rd+=hd;
+        });
+    };
+    
 }
 
 #[test]
@@ -195,7 +220,8 @@ pub fn test_mlp() {
         &rms_w,
         eps,
     );
-
+    residual.print();
+    residual.print();
     assert!(residual.close_to(
         &Tensor::<f32>::new(
             vec![
