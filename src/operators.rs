@@ -73,23 +73,24 @@ pub fn masked_softmax(y: &mut Tensor<f32>) {
 }
 
 pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: f32) {
-    let y_data=unsafe {
-        y.data_mut()
-    };
+    let shape = x.shape();
+    assert_eq!(shape, y.shape());
+    assert_eq!(shape.len(), 2);
+    let (batch_size, feature_size) = (shape[0], shape[1]);
 
-    let shape=x.shape();
-    for i in 0..shape[0] {
-        let row_range = i*shape[1]..(i+1)*shape[1];
-        let sq = ((x.data()[row_range.clone()]
-            .iter()
-            .map(|&x| x.powi(2))
-            .sum::<f32>()/shape[1] as f32)+epsilon).sqrt();
-        y_data[row_range.clone()].iter_mut()
-        .zip(x.data()[row_range].iter().zip(w.data().iter())).for_each(
-            |(y_d,(x_d,w_d,))|{
-                *y_d = (*w_d * *x_d )/ sq;
-            }
-        );
+    let x_data = x.data();
+    let w_data = w.data();
+    let y_data = unsafe { y.data_mut() };
+
+    for i in 0..batch_size {
+        let mut sum_squares = 0.0;
+        for j in 0..feature_size {
+            sum_squares += x_data[i * feature_size + j].powi(2);
+        }
+        let rms = (sum_squares / feature_size as f32 + epsilon).sqrt();
+        for j in 0..feature_size {
+            y_data[i * feature_size + j] = x_data[i * feature_size + j] / rms * w_data[j];
+        }
     }
 }
 
@@ -109,17 +110,22 @@ pub fn silu(y: &mut Tensor<f32>, x: &Tensor<f32>) {
 // C = beta * C + alpha * A @ B^T
 // hint: You don't need to do an explicit transpose of B
 pub fn matmul_transb(c: &mut Tensor<f32>, beta: f32, a: &Tensor<f32>, b: &Tensor<f32>, alpha: f32) {
-    // 默认当二维数组处理
-    let shape = c.shape().clone();
-    let mid=a.shape()[1];
-    let c_data=unsafe { c.data_mut() };
-    let mut offset=0;
-    for i in 0..shape[0]  {
-        let row=&a.data()[i*mid..(i+1)*mid];
-        for j in 0..shape[1] {
-            let column=&b.data()[j*mid..(j+1)*mid];
-            c_data[offset]=alpha*row.iter().zip(column).map(|(a,b)|a*b).sum::<f32>()+c_data[offset]*beta;
-            offset+=1;
+    let (m, k) = (a.shape()[0], a.shape()[1]);
+    let (n, _) = (b.shape()[1], b.shape()[0]);
+    assert_eq!(k, b.shape()[1]);
+    assert_eq!(c.shape(), &[m, n]);
+
+    let a_data = a.data();
+    let b_data = b.data();
+    let c_data = unsafe { c.data_mut() };
+
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum = 0.0;
+            for p in 0..k {
+                sum += a_data[i * k + p] * b_data[j * k + p];
+            }
+            c_data[i * n + j] = beta * c_data[i * n + j] + alpha * sum;
         }
     }
 }
