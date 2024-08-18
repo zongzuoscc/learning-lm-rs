@@ -76,18 +76,18 @@ pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: 
     let shape = x.shape();
     assert_eq!(shape, y.shape());
     assert_eq!(shape.len(), 2);
-    let (batch_size, feature_size) = (shape[0], shape[1]);
+    let (batch_size, feature_size) = (shape[0], shape[1]);//行数和列数
 
     let x_data = x.data();
-    let w_data = w.data();
+    let w_data = w.data();//权重
     let y_data = unsafe { y.data_mut() };
 
     for i in 0..batch_size {
         let mut sum_squares = 0.0;
         for j in 0..feature_size {
-            sum_squares += x_data[i * feature_size + j].powi(2);
+            sum_squares += x_data[i * feature_size + j].powi(2);//计算当前行元素平方和，x_data是一位数组，所以i * feature_size + j来计算出位置
         }
-        let rms = (sum_squares / feature_size as f32 + epsilon).sqrt();
+        let rms = (sum_squares / feature_size as f32 + epsilon).sqrt();//将feature_size强制转换为f32类型
         for j in 0..feature_size {
             y_data[i * feature_size + j] = x_data[i * feature_size + j] / rms * w_data[j];
         }
