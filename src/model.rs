@@ -161,38 +161,26 @@ fn self_attention(
 }
 
 fn mlp(
-    residual: &mut Tensor<f32>, // 4 2
+    residual: &mut Tensor<f32>,      // 4 2
     hidden_states: &mut Tensor<f32>, //4 2
-    gate: &mut Tensor<f32>, //4 3
-    up: &mut Tensor<f32>,// 4,3
-    w_up: &Tensor<f32>,// 3,2
-    w_down: &Tensor<f32>,// 2.3
-    w_gate: &Tensor<f32>, // 3,2
-    rms_w: &Tensor<f32>, // 2
+    gate: &mut Tensor<f32>,          //4 3
+    up: &mut Tensor<f32>,            // 4,3
+    w_up: &Tensor<f32>,              // 3,2
+    w_down: &Tensor<f32>,            // 2.3
+    w_gate: &Tensor<f32>,            // 3,2
+    rms_w: &Tensor<f32>,             // 2
     eps: f32,
 ) {
     // 1. 归一化 residual 并存储到 hidden_states 中
     rms_norm(hidden_states, residual, rms_w, eps);
-
     // 2. 计算 gate = hidden_states @ w_gate.T
-    matmul_transb(gate, 0.0, hidden_states, w_gate, 1.0);
-
+    matmul_transb(gate, 0., hidden_states, w_gate, 1.0);
     // 3. 计算 up = hidden_states @ w_up.T
-    matmul_transb(up, 0.0, hidden_states, w_up, 1.0);
-
+    matmul_transb(up, 0., hidden_states, w_up, 1.0);
     // 4. 通过 SiLU 激活函数计算 hidden_states = gate * sigmoid(gate) * up
-    silu(gate, up); // 这里使用之前写好的 silu 函数
-    let tmp_hidden = Tensor::new(gate.data().to_vec(), gate.shape());
-
+    silu(up, &gate);
     // 5. 计算 hidden_states = hidden_states @ w_down.T
-    matmul_transb(hidden_states, 0.0, &tmp_hidden, w_down, 1.0);
-
-    // 6. 残差连接：将 hidden_states 加到 residual 中
-    unsafe {
-        residual.data_mut().iter_mut().zip(hidden_states.data().iter()).for_each(|(rd, hd)| {
-            *rd += hd;
-        });
-    }
+    matmul_transb(residual, 1., &up, w_down, 1.);
 }
 
 #[test]
