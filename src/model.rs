@@ -171,16 +171,27 @@ fn mlp(
     rms_w: &Tensor<f32>,             // 2
     eps: f32,
 ) {
-    // 1. 归一化 residual 并存储到 hidden_states 中
+    // 1. 对 residual 进行 RMS 归一化，结果存储在 hidden_states 中
+    //    hidden_states = rms_norm(residual)
     rms_norm(hidden_states, residual, rms_w, eps);
+
     // 2. 计算 gate = hidden_states @ w_gate.T
-    matmul_transb(gate, 0., hidden_states, w_gate, 1.0);
+    //    gate 用于后续的激活函数计算
+    matmul_transb(gate, 0.0, hidden_states, w_gate, 1.0);
+
     // 3. 计算 up = hidden_states @ w_up.T
-    matmul_transb(up, 0., hidden_states, w_up, 1.0);
-    // 4. 通过 SiLU 激活函数计算 hidden_states = gate * sigmoid(gate) * up
+    //    up 是另一个中间结果，形状与 gate 相同
+    matmul_transb(up, 0.0, hidden_states, w_up, 1.0);
+
+    // 4. 通过 SiLU 激活函数计算 gate = gate * sigmoid(gate) * up
+    //    结果存储在 up 中，以便下一步使用
+    //    实际上, 这里将计算 gate * sigmoid(gate) * up 存储在 up 中
     silu(up, &gate);
-    // 5. 计算 hidden_states = hidden_states @ w_down.T
-    matmul_transb(residual, 1., &up, w_down, 1.);
+
+    // 5. 计算 residual = residual + up @ w_down.T
+    //    这一步同时计算了 hidden = up @ w_down.T 并将其加到 residual 中
+    //    通过设置 beta = 1.0，完成了 residual = hidden + residual 的操作
+    matmul_transb(residual, 1.0, &up, w_down, 1.0);
 }
 
 #[test]
