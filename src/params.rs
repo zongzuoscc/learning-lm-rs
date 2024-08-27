@@ -26,25 +26,30 @@ pub struct LLamaParams<T> {
 impl LLamaParams<f32> {
     pub fn from_safetensors(safetensor: &SafeTensors, config: &LlamaConfigJson) -> Self {
         let layers = config.num_hidden_layers;
-        safetensor.names().iter().for_each(|name| {
-            println!("{}", name);
-        });
-        let get_tensor= |name: &str| { 
-            match safetensor.tensor(name)  {
+
+        // 辅助函数：从 safetensors 中提取指定名称的 Tensor<f32>
+        let get_tensor = |name: &str| -> Tensor<f32> {
+            match safetensor.tensor(name) {
                 Ok(data) => {
-                    let p:usize=data.shape().iter().product();
-                    // 获取引用，只目前只转换成f32类型
-                   let new_data=unsafe { slice::from_raw_parts(data.data().as_ptr() as *const f32, p)};
-                   // 生成新对象
+                    let p: usize = data.shape().iter().product();
+                    let new_data =
+                        unsafe { std::slice::from_raw_parts(data.data().as_ptr() as *const f32, p) };
                     Tensor::new(Vec::from(new_data), &data.shape().to_vec())
-                } ,
-                Err(err) => {
-                Tensor::default(&Vec::new())
-                },
+                }
+                Err(_) => Tensor::default(&Vec::new()),
             }
         };
-        Self {
-            embedding_table: get_tensor("lm_head.weight"),
+
+        // 加载 embedding_table 和 lm_head
+        let embedding_table = get_tensor("model.embed_tokens.weight");
+        let lm_head = if config.tie_word_embeddings {
+            embedding_table.clone()
+        } else {
+            get_tensor("lm_head.weight")
+        };
+
+        LLamaParams {
+            embedding_table,
             rms_att_w: (0..layers)
                 .map(|i| get_tensor(&format!("model.layers.{i}.input_layernorm.weight")))
                 .collect(),
@@ -73,7 +78,7 @@ impl LLamaParams<f32> {
                 .map(|i| get_tensor(&format!("model.layers.{i}.mlp.down_proj.weight")))
                 .collect(),
             rms_out_w: get_tensor("model.norm.weight"),
-            lm_head: get_tensor("lm_head.weight"),
+            lm_head,
         }
     }
 }
