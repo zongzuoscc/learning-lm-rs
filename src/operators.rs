@@ -73,23 +73,45 @@ pub fn masked_softmax(y: &mut Tensor<f32>) {
 }
 
 pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: f32) {
-    let shape = x.shape();
-    assert_eq!(shape, y.shape());
-    assert_eq!(shape.len(), 2);
-    let (batch_size, feature_size) = (shape[0], shape[1]);//行数和列数
-
-    let x_data = x.data();
-    let w_data = w.data();//权重
-    let y_data = unsafe { y.data_mut() };
-
-    for i in 0..batch_size {
-        let mut sum_squares = 0.0;
-        for j in 0..feature_size {
-            sum_squares += x_data[i * feature_size + j].powi(2);//计算当前行元素平方和，x_data是一位数组，所以i * feature_size + j来计算出位置
-        }
-        let rms = (sum_squares / feature_size as f32 + epsilon).sqrt();//将feature_size强制转换为f32类型
-        for j in 0..feature_size {
-            y_data[i * feature_size + j] = x_data[i * feature_size + j] / rms * w_data[j];
+    assert!(y.size() == x.size());
+    // 获取维度数
+    let ndim = y.shape().len();
+    // 确保至少有2个维度
+    assert!(ndim >= 2);
+    // 序列的数量
+    let seq_len = y.shape()[ndim - 2];
+    // 每个序列的长度
+    let total_seq_len = y.shape()[ndim - 1];
+    // 获取维度数
+    let wdim = w.shape().len();
+    // 确保只有1个维度
+    assert!(wdim == 1);
+    // 确保长度相同
+    assert!(w.size() == total_seq_len);
+    // 批次数量
+    let batch = y.size() / (seq_len * total_seq_len);
+    // 获取数据的引用
+    let _y = unsafe { y.data_mut() };
+    let _x = x.data();
+    let _w = w.data();
+    // 遍历每个批次
+    for b in 0..batch {
+        // 当前批次的基索引
+        let base = b * seq_len * total_seq_len;
+        // 遍历批次中的每个序列
+        for l in 0..seq_len {
+            // 当前序列的偏移量
+            let offset = base + l * total_seq_len;
+            // 平方和
+            let s: f32 = _x[offset..offset + total_seq_len]
+                .iter()
+                .map(|f| f * f)
+                .sum();
+            let sqrt = (s / total_seq_len as f32 + epsilon).sqrt();
+            // 计算并储存结果
+            for i in 0..total_seq_len {
+                _y[offset + i] = _w[i] * _x[offset + i] / sqrt;
+            }
         }
     }
 }
