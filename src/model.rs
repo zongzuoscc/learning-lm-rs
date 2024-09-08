@@ -3,25 +3,52 @@ use std::vec;
 
 use crate::config::LlamaConfigJson;
 use crate::kvcache::KVCache;
-use crate::operators::{self as OP, masked_softmax, matmul_transb, random_sample, rms_norm, silu};
+use crate::operators::{self as OP, masked_softmax, matmul_transb, random_sample, rms_norm, silu,rope,gather};
 use crate::params::LLamaParams;
 use crate::tensor::Tensor;
 use safetensors::SafeTensors;
 use std::path::Path;
 pub struct Llama<T> {
-    vocab: usize,           // vocab size
-    n_layers: usize,        // number of layers
-    n_q_h: usize,           // number of heads for q
-    n_kv_h: usize,          // number of heads for k and v
-    d: usize,               // dimension of hidden states
-    dqkv: usize,            // length of a single q, k, or v vector
-    di: usize,              // dimension of intermediate states
-    eps: f32,               // epsilon for RMS normalization
-    rope_theta: f32,        // rope theta for rope initialization
-    max_seq_len: usize,     // maximum sequence length
-    params: LLamaParams<T>, // trained weights of this model
-    bos_token_id: u32,      // start token id
-    eos_token_id: u32,      // end token id
+    vocab: usize,           // vocab size 表示模型的词汇表大小，即模型能够处理的词汇数量
+    //词汇表大小决定了模型可以理解和生成的不同 token（词汇、子词或字符）的数量。通常，对于 NLP 模型，词汇表包括所有可能的输入和输出词汇。
+
+    n_layers: usize,        // number of layers 表示模型中的层数
+    //Transformer 模型由多个层组成，每一层执行类似的操作。n_layers 决定了模型的深度，层数越多，模型的表达能力和复杂性也会增加。
+
+    n_q_h: usize,           // number of heads for q 表示 Query 头的数量
+    //Transformer 模型使用多头自注意力机制，n_q_h 表示 Query 向量的多头数量。每个头可以独立地关注输入序列的不同部分。
+
+    n_kv_h: usize,          // number of heads for k and v 表示 Key 和 Value 头的数量
+    //与 Query 类似，Key 和 Value 也有各自的多头机制。n_kv_h 指定了 Key 和 Value 的头数。
+    //一般来说，n_kv_h 可以与 n_q_h 不同，以调整不同的注意力机制。
+
+    d: usize,               // dimension of hidden states 隐藏状态的维度
+    //d 决定了每层 Transformer 中间表示的维度，即每个 token 在处理过程中的特征向量的大小。较大的 d 提供了更多的表示能力。
+
+    dqkv: usize,            // length of a single q, k, or v vector 单个 Query、Key 或 Value 向量的长度。
+    //dqkv 决定了 Query、Key 和 Value 向量的维度大小。通常，它等于 d 除以多头的数量 (n_q_h)，因为每个头只分配到 d / n_q_h 的维度。
+
+    di: usize,              // dimension of intermediate states 中间层的维度
+    //在 Feed-Forward 网络中，隐藏层的大小通常比输入层和输出层的维度大，di 决定了这个中间层的维度。这个参数直接影响模型的复杂性。
+
+    eps: f32,               // epsilon for RMS normalization RMS 归一化的 epsilon 值
+    
+    rope_theta: f32,        // rope theta for rope initialization RoPE初始化参数
+    //LLaMA 模型中使用 RoPE 进行位置编码，rope_theta 是 RoPE 的一个参数，
+    //用于控制位置嵌入的旋转频率。位置编码允许模型感知输入序列中各个 token 的相对位置。
+
+    max_seq_len: usize,     // maximum sequence length 最大序列长度
+    //表示模型能够处理的最大输入序列长度。输入序列的长度不能超过这个值，超出部分将被截断。
+
+    params: LLamaParams<T>, // trained weights of this model 模型的训练权重参数
+    //params 保存了模型中所有需要学习的参数，包括网络中的权重矩阵（如 Attention 权重、Feed-Forward 网络权重等）。
+    //LLamaParams<T> 是另一个结构体，包含模型的所有权重。
+
+    bos_token_id: u32,      // start token id 序列的起始 Token ID
+    //表示序列的起始符号的 token ID，用于生成文本或进行推理时，告诉模型这是序列的开始。通常在文本生成任务中使用。
+
+    eos_token_id: u32,      // end token id 序列的结束 Token ID
+    //表示序列的结束符号的 token ID，用于告诉模型生成结束。这在自动生成文本时非常重要，模型在生成到该 token 时会停止继续生成
 }
 
 impl Llama<f32> {
@@ -72,10 +99,10 @@ impl Llama<f32> {
 
         // Computation Starts Here
         // Embedding lookup
-        OP::gather(&mut residual, input, &self.params.embedding_table);
+        gather(&mut residual, input, &self.params.embedding_table);
 
         for layer in 0..self.n_layers {
-            OP::rms_norm(
+            rms_norm(
                 &mut hidden_states,
                 &residual,
                 &self.params.rms_att_w[layer],
@@ -85,15 +112,15 @@ impl Llama<f32> {
             let q = (&mut q_buf).reshape(&vec![seq_len, self.n_q_h * self.dqkv]); // (seq, n_h * dqkv)
             let k = &mut cache.k_cache(layer, past_seq_len); // (seq, n_kv_h * dqkv)
             let v = &mut cache.v_cache(layer, past_seq_len); // (seq, n_kv_h * dqkv)
-            OP::matmul_transb(q, 0., &hidden_states, &self.params.wq[layer], 1.0);
-            OP::matmul_transb(k, 0., &hidden_states, &self.params.wk[layer], 1.0);
-            OP::matmul_transb(v, 0., &hidden_states, &self.params.wv[layer], 1.0);
-            OP::rope(
+            matmul_transb(q, 0., &hidden_states, &self.params.wq[layer], 1.0);
+            matmul_transb(k, 0., &hidden_states, &self.params.wk[layer], 1.0);
+            matmul_transb(v, 0., &hidden_states, &self.params.wv[layer], 1.0);
+            rope(
                 q.reshape(&vec![seq_len, self.n_q_h, self.dqkv]),
                 past_seq_len,
                 self.rope_theta,
             );
-            OP::rope(
+            rope(
                 k.reshape(&vec![seq_len, self.n_kv_h, self.dqkv]),
                 past_seq_len,
                 self.rope_theta,
@@ -116,7 +143,7 @@ impl Llama<f32> {
             );
 
             // x = x @ O_weight.T
-            OP::matmul_transb(&mut hidden_states, 0., &x, &self.params.wo[layer], 1.0);
+            matmul_transb(&mut hidden_states, 0., &x, &self.params.wo[layer], 1.0);
 
             // residual = x + residual
             let len = residual.size();
@@ -146,14 +173,14 @@ impl Llama<f32> {
         let mut hidden_states = hidden_states.slice((seq_len - 1) * self.d, &vec![1, self.d]);
         let residual = residual.slice((seq_len - 1) * self.d, &vec![self.d]);
 
-        OP::rms_norm(
+        rms_norm(
             &mut hidden_states,
             &residual,
             &self.params.rms_out_w,
             self.eps,
         );
 
-        OP::matmul_transb(&mut logits, 0., &hidden_states, &self.params.lm_head, 1.0);
+        matmul_transb(&mut logits, 0., &hidden_states, &self.params.lm_head, 1.0);
 
         logits
     }
@@ -188,56 +215,64 @@ impl Llama<f32> {
 }
 
 fn self_attention(
-    hidden_states: &mut Tensor<f32>, // (seq, n_kv_h * n_groups * dqkv)
-    att_scores: &mut Tensor<f32>,    // (n_kv_h, n_groups, seq, total_seq)
-    q: &Tensor<f32>,                 // (seq, n_kv_h * n_groups * dqkv)
-    k: &Tensor<f32>,                 // (total_seq, n_kv_h * dqkv)
-    v: &Tensor<f32>,                 // (total_seq, n_kv_h * dqkv)
-    n_kv_h: usize,
-    n_groups: usize,
-    seq_len: usize,
-    total_seq_len: usize,
-    dqkv: usize,
+    hidden_states: &mut Tensor<f32>, // (seq, n_kv_h * n_groups * dqkv) 表示输入序列的隐藏状态张量，用于存储注意力计算后的输出结果。
+    //seq：序列长度  n_kv_h：Key 和 Value 的头数量  n_groups：头分组的数量 dqkv：单个 Query、Key 或 Value 向量的维度
+
+    att_scores: &mut Tensor<f32>,    // (n_kv_h, n_groups, seq, total_seq) 存储自注意力的得分
+    //n_kv_h：Key 和 Value 头数量  n_groups：头分组的数量  seq：当前输入序列的长度  total_seq：总序列长度，可能包含缓存的过往序列
+
+    q: &Tensor<f32>,                 // (seq, n_kv_h * n_groups * dqkv) Query 张量，表示查询向量
+    k: &Tensor<f32>,                 // (total_seq, n_kv_h * dqkv) Key 张量，表示键向量，用于与 Query 进行点积计算注意力得分
+    v: &Tensor<f32>,                 // (total_seq, n_kv_h * dqkv) Value 张量，表示值向量，用于根据注意力得分加权得到输出
+    n_kv_h: usize,                   //Key 和 Value 的头数  每个头是注意力机制的一个独立实例，可以学习不同的注意力模式。
+    n_groups: usize,                 //头的分组数量。在某些模型中，头被划分为不同的组以进行并行计算。
+    seq_len: usize,                  //输入序列的长度，即本次前向传播中的序列长度。
+    total_seq_len: usize,            //总序列长度，通常包括过去的序列长度（在缓存中），因此等于 past_seq_len + seq_len。
+    dqkv: usize,                     //单个 Query、Key 或 Value 向量的维度。
 ) {
     // score = Q @ K.T / sqrt(dim)
     let _a = unsafe { att_scores.data_mut() };
     let _q = q.data();
     let _k = k.data();
     let _v = v.data();
-    let sqrt = (dqkv as f32).sqrt();
 
-    for h in 0..n_kv_h * n_groups {
-        for l in 0..seq_len {
-            for i in 0..total_seq_len {
-                let sum = (0..dqkv)
-                    .map(|j| {
-                        _q[l * n_kv_h * n_groups * dqkv + h * dqkv + j]
-                            * _k[i * n_kv_h * dqkv + h / n_groups * dqkv + j]
+    //self-attention的核心步骤计算query和key的点积
+    let sqrt = (dqkv as f32).sqrt();
+    for h in 0..n_kv_h * n_groups { //遍历头
+        for l in 0..seq_len {  //遍历序列位置
+            for i in 0..total_seq_len {  //每个序列位置上对应的token
+                let sum = (0..dqkv)  //对 dqkv 范围内的每个元素进行遍历计算。
+                    .map(|j| {  //对于 j（从 0 到 dqkv-1 的每个值），进行 Query 和 Key 对应维度的点乘。
+                        _q[l * n_kv_h * n_groups * dqkv + h * dqkv + j]  //获取第 l 个位置、第 h 个头的第 j 个维度的 Query 向量元素。
+                            * _k[i * n_kv_h * dqkv + h / n_groups * dqkv + j]  //获取第 i 个位置、第 h 个头的第 j 个维度的 Key 向量元素。
                     })
-                    .sum::<f32>();
+                    .sum::<f32>();//对所有维度的 Query 和 Key 元素的点积进行累加，得到 Query 和 Key 向量之间的相似度分数（即点积的和）。
                 _a[h * seq_len * total_seq_len + l * total_seq_len + i] = sum / sqrt;
+                //将计算出的相似度分数除以 sqrt（即 dqkv 的平方根）以标准化相似度分数，防止数值过大导致训练不稳定。
+                //将归一化后的相似度分数存储到 att_scores 张量中的正确位置。这个位置对应第 h 个头，
+                //第 l 个 Query 对应第 i 个 Key 的相似度分数。
             }
         }
     }
 
     // attn = softmax(score)
     masked_softmax(att_scores);
+    //将得到的自注意力得分通过 Softmax 转化为概率分布，表示每个序列位置对其他序列位置的注意力权重。
+    //这一步操作使得得分变为一个在 [0, 1] 之间的概率值，所有得分的总和为 1，表示当前 token 对每个位置的关注程度。
 
     // x = attn @ V
     let _a = att_scores.data();
     let _h = unsafe { hidden_states.data_mut() };
     for h in 0..n_kv_h * n_groups {
-        //行
         for l in 0..seq_len {
-            //列
             for i in 0..dqkv {
-                let sum = (0..total_seq_len)
+                let sum = (0..total_seq_len)//计算当前 Query 对应的加权 Value。
                     .map(|j| {
-                        _a[h * seq_len * total_seq_len + l * total_seq_len + j]
-                            * _v[i + h / n_groups * dqkv + j * n_kv_h * dqkv]
+                        _a[h * seq_len * total_seq_len + l * total_seq_len + j]//取出 att_scores 张量中第 h 个头，第 l 个 Query 对应第 j 个 Key 的注意力分数。
+                            * _v[i + h / n_groups * dqkv + j * n_kv_h * dqkv]//取出 Value 张量中第 j 个 Key 的 Value 元素（对应第 i 维的向量）。
                     })
-                    .sum::<f32>();
-                _h[l * n_kv_h * n_groups * dqkv + h * dqkv + i] = sum;
+                    .sum::<f32>();//对所有位置 j 的加权 Value 求和，得到当前 Query 对所有 Key 的加权和，表示最终的输出。
+                _h[l * n_kv_h * n_groups * dqkv + h * dqkv + i] = sum;//将加权求和的结果存储到 hidden_states 张量中，表示对 Query 的计算结果
             }
         }
     }
