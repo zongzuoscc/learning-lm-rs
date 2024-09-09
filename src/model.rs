@@ -236,24 +236,21 @@ fn self_attention(
     let _k = k.data();
     let _v = v.data();
 
-    //self-attention的核心步骤计算query和key的点积
-    let sqrt = (dqkv as f32).sqrt();
-    for h in 0..n_kv_h * n_groups { //遍历头
-        for l in 0..seq_len {  //遍历序列位置
-            for i in 0..total_seq_len {  //每个序列位置上对应的token
-                let sum = (0..dqkv)  //对 dqkv 范围内的每个元素进行遍历计算。
-                    .map(|j| {  //对于 j（从 0 到 dqkv-1 的每个值），进行 Query 和 Key 对应维度的点乘。
-                        _q[l * n_kv_h * n_groups * dqkv + h * dqkv + j]  //获取第 l 个位置、第 h 个头的第 j 个维度的 Query 向量元素。
-                            * _k[i * n_kv_h * dqkv + h / n_groups * dqkv + j]  //获取第 i 个位置、第 h 个头的第 j 个维度的 Key 向量元素。
-                    })
-                    .sum::<f32>();//对所有维度的 Query 和 Key 元素的点积进行累加，得到 Query 和 Key 向量之间的相似度分数（即点积的和）。
-                _a[h * seq_len * total_seq_len + l * total_seq_len + i] = sum / sqrt;
-                //将计算出的相似度分数除以 sqrt（即 dqkv 的平方根）以标准化相似度分数，防止数值过大导致训练不稳定。
-                //将归一化后的相似度分数存储到 att_scores 张量中的正确位置。这个位置对应第 h 个头，
-                //第 l 个 Query 对应第 i 个 Key 的相似度分数。
+    let sqrt = (dqkv as f32).sqrt(); // 计算 dqkv 的平方根，用于归一化
+    for h in 0..n_kv_h * n_groups { // 遍历所有的 attention 头，每个头包含多个组
+        for l in 0..seq_len { // 遍历每个 Query（序列的长度）
+            for i in 0..total_seq_len { // 遍历所有 Key（总序列长度）
+                let mut sum = 0.0; // 初始化点积累加器
+                for j in 0..dqkv { // 对 Query 和 Key 向量的每个维度进行点积
+                    sum += _q[l * n_kv_h * n_groups * dqkv + h * dqkv + j] // 取出第 l 个 Query，第 h 个头，第 j 维的 Query 值
+                        * _k[i * n_kv_h * dqkv + h / n_groups * dqkv + j]; // 取出第 i 个 Key，第 h 个头，第 j 维的 Key 值
+                }
+                _a[h * seq_len * total_seq_len + l * total_seq_len + i] = sum / sqrt; // 存储归一化后的点积结果到 att_scores 中
             }
         }
     }
+
+
 
     // attn = softmax(score)
     masked_softmax(att_scores);
@@ -261,18 +258,18 @@ fn self_attention(
     //这一步操作使得得分变为一个在 [0, 1] 之间的概率值，所有得分的总和为 1，表示当前 token 对每个位置的关注程度。
 
     // x = attn @ V
-    let _a = att_scores.data();
-    let _h = unsafe { hidden_states.data_mut() };
-    for h in 0..n_kv_h * n_groups {
-        for l in 0..seq_len {
-            for i in 0..dqkv {
-                let sum = (0..total_seq_len)//计算当前 Query 对应的加权 Value。
-                    .map(|j| {
-                        _a[h * seq_len * total_seq_len + l * total_seq_len + j]//取出 att_scores 张量中第 h 个头，第 l 个 Query 对应第 j 个 Key 的注意力分数。
-                            * _v[i + h / n_groups * dqkv + j * n_kv_h * dqkv]//取出 Value 张量中第 j 个 Key 的 Value 元素（对应第 i 维的向量）。
-                    })
-                    .sum::<f32>();//对所有位置 j 的加权 Value 求和，得到当前 Query 对所有 Key 的加权和，表示最终的输出。
-                _h[l * n_kv_h * n_groups * dqkv + h * dqkv + i] = sum;//将加权求和的结果存储到 hidden_states 张量中，表示对 Query 的计算结果
+    let _a = att_scores.data(); // 获取 attention 分数的引用
+    let _h = unsafe { hidden_states.data_mut() }; // 获取 hidden_states 的可变引用
+    for h in 0..n_kv_h * n_groups { // 遍历所有的 attention 头
+        for l in 0..seq_len { // 遍历所有 Query（序列长度）
+            for i in 0..dqkv { // 遍历 Query 向量的每个维度
+                let mut sum = 0.0; // 初始化累加器，用于计算加权和
+                for j in 0..total_seq_len { // 遍历所有 Key（总序列长度）
+                    // 取出第 h 个头，第 l 个 Query，第 j 个 Key 的注意力分数，并乘以对应的 Value 值
+                    sum += _a[h * seq_len * total_seq_len + l * total_seq_len + j] // 取出 attention scores 中第 h 个头，第 l 个 Query 对应第 j 个 Key 的分数
+                        * _v[i + h / n_groups * dqkv + j * n_kv_h * dqkv]; // 取出第 i 维，第 j 个 Key 对应的 Value 值
+                }
+                _h[l * n_kv_h * n_groups * dqkv + h * dqkv + i] = sum; // 将加权和存储到 hidden_states 的第 l 个 Query，第 h 个头，第 i 维度的输出中
             }
         }
     }
