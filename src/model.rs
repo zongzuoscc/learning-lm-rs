@@ -129,42 +129,50 @@ impl Llama<f32> {
             let full_k = &mut cache.k_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
             let full_v = &mut cache.v_cache(layer, 0); // (total_seq, n_kv_h * dqkv)
 
+            //todo!("self_attention(...)");
+            //todo!("down_proj matmul and add residual");
+
+            //todo!("mlp(...)");
+            //调用sel_attention函数进行计算
             self_attention(
-                &mut x,
-                &mut att_scores,
-                q,
-                &full_k,
-                &full_v,
-                self.n_kv_h,
-                n_groups,
-                seq_len,
-                total_seq_len,
-                self.dqkv,
+                &mut x,              // 存储注意力机制的输出张量
+                &mut att_scores,      // 存储注意力得分的张量
+                q,                   // Query 张量，表示查询向量
+                &full_k,             // Key 张量，表示键向量
+                &full_v,             // Value 张量，表示值向量
+                self.n_kv_h,         // Key 和 Value 的头数量
+                n_groups,            // 注意力头的分组数量
+                seq_len,             // 输入序列的长度
+                total_seq_len,       // 总序列长度（包括当前序列和缓存的过往序列）
+                self.dqkv,           // 单个 Query、Key 或 Value 向量的维度
             );
+            
 
             // x = x @ O_weight.T
             matmul_transb(&mut hidden_states, 0., &x, &self.params.wo[layer], 1.0);
 
-            // residual = x + residual
-            let len = residual.size();
-            assert!(len == hidden_states.size());
-            let _r = unsafe { residual.data_mut() };
-            let _h = hidden_states.data();
-            for i in 0..len {
-                _r[i] += _h[i];
+            // residual = x + residual残差连接
+            let len = residual.size();                          // 获取 residual 张量的大小
+            assert!(len == hidden_states.size());               // 检查 residual 和 hidden_states 的尺寸是否相等
+            let _r = unsafe { residual.data_mut() };            // 获取 residual 的可变数据指针
+            let _h = hidden_states.data();                      // 获取 hidden_states 的数据指针
+            for i in 0..len {                                   // 遍历每个元素
+                _r[i] += _h[i];                                 // 将 hidden_states 加到 residual 上，实现残差连接
             }
 
+            // 调用 MLP 层，进一步处理 residual 中的内容
             mlp(
-                &mut residual,
-                &mut hidden_states,
-                &mut gate_buf,
-                &mut up_buf,
-                &self.params.w_up[layer],
-                &self.params.w_down[layer],
-                &self.params.w_gate[layer],
-                &self.params.rms_ffn_w[layer],
-                self.eps,
+                &mut residual,                                  // residual 被传入 MLP 层处理
+                &mut hidden_states,                             // 处理结果存储在 hidden_states 中
+                &mut gate_buf,                                  // gate_buf 是 MLP 中的中间结果
+                &mut up_buf,                                    // up_buf 是另一个中间结果
+                &self.params.w_up[layer],                       // w_up 是 MLP 层的上投影矩阵
+                &self.params.w_down[layer],                     // w_down 是 MLP 层的下投影矩阵
+                &self.params.w_gate[layer],                     // w_gate 是 MLP 层的门控权重
+                &self.params.rms_ffn_w[layer],                  // RMS 归一化的权重
+                self.eps,                                       // 归一化的 epsilon
             );
+
         }
 
         // No matter what seq_len, the output is always a 1D vector of length vocab,
@@ -187,31 +195,40 @@ impl Llama<f32> {
 
     pub fn generate(
         &self,
-        token_ids: &[u32],
-        max_len: usize,
-        top_p: f32,
-        top_k: u32,
-        temperature: f32,
-    ) -> Vec<u32> {
-        let mut result = Vec::<u32>::new();
-        let mut cache = self.new_cache();
-        let mut token: Vec<u32> = Vec::from(token_ids);
+        token_ids: &[u32],    // 输入的 token 序列，表示开始生成的初始上下文
+        max_len: usize,       // 要生成的最大长度（token 数量）
+        top_p: f32,           // 用于 nucleus sampling 的概率阈值
+        top_k: u32,           // 用于 top-k sampling 的 k 值，表示只从概率最高的前 k 个 token 中采样
+        temperature: f32,     // 控制生成的随机性，数值越高，生成的结果越随机
+    ) -> Vec<u32> {           // 返回生成的 token 序列
+        let mut result = Vec::<u32>::new();    // 存储生成的结果
+        let mut cache = self.new_cache();      // 初始化 key-value cache，用于存储每一层的计算结果
+        let mut token: Vec<u32> = Vec::from(token_ids); // 将输入的 token 序列转化为 Vec 类型
+    
+        // 如果输入的 token 列表没有包含开始 token (BOS)，插入开始 token
         if token[0] != self.bos_token_id {
             token.insert(0, self.bos_token_id);
         }
+        // 将 token 序列转换为张量，并为输入赋值。输入是一个二维张量，形状为 (1, token_ids.len())
         let mut input = Tensor::<u32>::new(token, &vec![1, token_ids.len()]);
-        loop {
-            let output =
-                random_sample(&self.forward(&input, &mut cache), top_p, top_k, temperature);
-            result.push(output);
-            if result.len() >= max_len || output == self.eos_token_id {
+        // 开始生成循环，直到生成的 token 数达到最大长度
+        while result.len() < max_len {
+            // 前向传播，得到 logits（对每个词的概率分布）
+            let logits = self.forward(&input, &mut cache);
+            // 从 logits 中采样下一个 token，根据 top_p, top_k, temperature 生成策略选择
+            let next_token = random_sample(&logits, top_p, top_k, temperature);
+            // 将生成的 token 添加到结果列表
+            result.push(next_token);
+            // 如果生成的是结束 token (EOS)，停止生成
+            if next_token == self.eos_token_id {
                 break;
             }
-            input = Tensor::<u32>::new(Vec::from([output]), &vec![1, 1]);
+            // 更新输入，将生成的 token 作为下一次生成的输入
+            input = Tensor::<u32>::new(Vec::from([next_token]), &vec![1, 1]);
         }
-
+        // 返回生成的 token 序列
         result
-    }
+    }    
 }
 
 fn self_attention(
