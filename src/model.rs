@@ -189,6 +189,11 @@ impl Llama<f32> {
         );
 
         matmul_transb(&mut logits, 0., &hidden_states, &self.params.lm_head, 1.0);
+        //hidden_states存储结果
+        //0.：表示乘法的第一个操作数的系数表示不使用之前的 hidden_states 值（相当于对 hidden_states 重新赋值）
+        //x：即 attention_output。这是通过 attn @ V 得到的值。
+        //self.params.wo[layer]: 该参数是权重矩阵 wo，表示将 x 从注意力头的维度投影回到隐藏层维度。
+        //1.0: 第二个操作数的系数，1.0 表示直接使用乘法结果。
 
         logits
     }
@@ -199,10 +204,10 @@ impl Llama<f32> {
         max_len: usize,       // 要生成的最大长度（token 数量）
         top_p: f32,           // 用于 nucleus sampling 的概率阈值
         top_k: u32,           // 用于 top-k sampling 的 k 值，表示只从概率最高的前 k 个 token 中采样
-        temperature: f32,     // 控制生成的随机性，数值越高，生成的结果越随机
+        temperature: f32,     // 控制生成的随机性，数值越高，生成的结果越随机(也可称之为有创意)，反之，越小，结果越自信
     ) -> Vec<u32> {           // 返回生成的 token 序列
         let mut result = Vec::<u32>::new();    // 存储生成的结果
-        let mut cache = self.new_cache();      // 初始化 key-value cache，用于存储每一层的计算结果
+        let mut cache = self.new_cache();      // 初始化 key-value cache，用于存储每一层的计算结果 可以被复用
         let mut token: Vec<u32> = Vec::from(token_ids); // 将输入的 token 序列转化为 Vec 类型
     
         // 如果输入的 token 列表没有包含开始 token (BOS)，插入开始 token
