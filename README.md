@@ -1,5 +1,33 @@
 # 简单大模型推理系统
 
+本项目使用rust编写完成了一个简单的大模型推理程序
+由于本人能力与时间精力有限，处在大二阶段且刚接触生成式ai的学习，只能通过不到两个月的时间完成文本生成功能
+
+通过此次项目也提升了git的使用技巧，并且学习了一门新的语言rust
+
+在此次项目中，不止学习了infinitensor训练营中的课程，也参考了以下课程
+
+[从零开始构建 GPT 系列](https://www.bilibili.com/video/BV11yHXeuE9d/?p=7&share_source=copy_web&vd_source=44a0f2675d4e61f83d2eacdcba85bcf7&t=3720)
+
+[动手学习深度学习视频讲解](https://www.bilibili.com/video/BV1if4y147hS?vd_source=02f908c3673a022f7ceb9b5fb1347e23)
+
+[动手学深度学习课本](https://zh.d2l.ai/)
+
+
+如何运行生成story项目
+```bash
+  cd learning-lm-rs
+  cargo run
+```
+以下为生成的故事效果
+
+<center>  <!--开始居中对齐-->
+
+![Lapland](C:\Users\26515\Desktop\exam-grading\learning-lm-rs\● README.md - exam-grading - Visual Studio Code 2024_9_26 21_50_58.png )
+</center> <!--结束居中对齐-->
+
+
+--- 
 欢迎各位同学。本课程中，各位将用Rust语言分阶段实现一个简单的大模型推理程序。
 
 本课程分为两个阶段：作业阶段，各位将实现大模型的几个关键算子，Feed-Forward神经网络，以及大模型的参数加载；项目阶段，各位将实现大模型最为核心的Self-Attention结构，完成大模型的文本生成功能。之后，可以选择继续实现AI对话功能，搭建一个小型的聊天机器人服务。
