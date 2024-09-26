@@ -23,7 +23,7 @@
 
 <center>  <!--开始居中对齐-->
 
-![Lapland](C:\Users\26515\Desktop\exam-grading\learning-lm-rs\● README.md - exam-grading - Visual Studio Code 2024_9_26 21_50_58.png )
+(![● README.md - exam-grading - Visual Studio Code 2024_9_26 21_50_58.png](https://github.com/zongzuoscc/learning-lm-rs/blob/main/%E2%97%8F%20README.md%20-%20exam-grading%20-%20Visual%20Studio%20Code%202024_9_26%2021_50_58.png))
 </center> <!--结束居中对齐-->
 
 
