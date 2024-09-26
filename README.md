@@ -26,6 +26,8 @@
 (![● README.md - exam-grading - Visual Studio Code 2024_9_26 21_50_58.png](https://github.com/zongzuoscc/learning-lm-rs/blob/main/%E2%97%8F%20README.md%20-%20exam-grading%20-%20Visual%20Studio%20Code%202024_9_26%2021_50_58.png))
 </center> <!--结束居中对齐-->
 
+虽然在结营仪式前未能完整的将项目完成，但是，希望我能在今后的学习中提升专业知识，将项目逐步完善完整
+
 
 --- 
 欢迎各位同学。本课程中，各位将用Rust语言分阶段实现一个简单的大模型推理程序。
