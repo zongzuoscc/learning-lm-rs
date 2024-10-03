@@ -26,8 +26,92 @@
 (![● README.md - exam-grading - Visual Studio Code 2024_9_26 21_50_58.png](https://github.com/zongzuoscc/learning-lm-rs/blob/main/%E2%97%8F%20README.md%20-%20exam-grading%20-%20Visual%20Studio%20Code%202024_9_26%2021_50_58.png))
 </center> <!--结束居中对齐-->
 
-虽然在结营仪式前未能完整的将项目完成，但是，希望我能在今后的学习中提升专业知识，将项目逐步完善完整
+--- 
 
+### 神经网络
+神经网络通常由以下几种类型的层组成：
+
+输入层：接收原始数据作为网络的输入。
+隐藏层：网络中的中间层，可以有多个，负责对输入数据进行处理和特征提取。
+输出层：产生网络的最终输出，其神经元的数量和类型取决于特定的任务（如分类、回归等）。
+
+#### silu算子(激活函数)
+
+SILU 是一种激活函数，用于在神经网络的隐藏层中引入非线性，帮助模型学习更复杂的特征表示。SILU 作为激活函数，通常应用于神经网络的隐藏层，特别是在需要动态调整信息流的场景中。
+
+1.平滑激活：输出值在-1到1之间，但与sigmoid函数不同，当输入过大或很小时，silu函数的输出不会饱和
+
+2.数据规范化：将数据压缩到一个特定的范围可以防止激活值过大或过小，从而有助于防止梯度消失或梯度爆炸问题
+
+3.非线性映射，平滑性和连续性，减少过拟合，提高数值稳定性（尤其在浮点数运算时），与人类感知的相似性
+
+$$
+y=silu(x) × y
+$$
+
+$$
+silu(x) = sigmoid(x) × x
+$$
+
+
+$$
+sigmoid(x) = \frac{1}{1 + e^{-x}}
+$$
+
+依照上述公式即可实现silu函数
+
+
+#### RMS Normalization 
+RMS Normalization 是一种输入数据预处理或层间规范化的技术，主要目的是调整数据的尺度，使模型训练更加稳定。通过对数据进行规范化来减少内部协变量偏移，加速模型的收敛，提高模型的性能和泛化能力。
+
+RMS Normalization 通常应用于模型的输入层或中间层，对输入数据或中间特征进行规范化处理。
+
+在编写rms_norm函数时，确保y至少有两个维度
+
+$$
+y_i=\frac{w×x_i}{\sqrt{ \frac{1}{n} \sum_{j} x_{ij}^2 +\epsilon}}
+$$
+
+
+#### feed-forward（mlp）函数
+Feed-forward（MLP）函数通常指的是前馈神经网络中的多层感知机（Multilayer Perceptron）模型。在机器学习和深度学习领域，MLP 是一种基本的神经网络结构，它由多个层组成，每层包含若干个神经元（或节点）。MLP 的特点是信息只在一个方向上流动，从输入层到隐藏层，再到输出层，层与层之间是全连接的。
+
+计算过程如下
+
+``` python
+hidden = rms_norm(residual)
+gate = hidden @ gate_weight.T
+up = hidden @ up_weight.T
+hidden = gate * sigmoid(gate) * up ## silu
+hidden = hidden @ down_weight.T
+residual = hidden + residual
+```
+需要注意，在本项目中，最后两部，即``hidden = hidden @ down_weight.T`` ,``residual = hidden + residual``
+是在mlp函数外实现的，它们通常是自注意力机制之外的操作，需要在函数外或后续处理中完成。
+
+
+#### word embedding
+词嵌入（Word Embeddings）：如 Word2Vec、GloVe、FastText 等，用于将单词映射到向量。
+
+#### encoder decoder
+
+Encoder 是一个将输入数据转换为另一种形式或表示的模块，通常用于提取数据的特征或压缩数据。在 NLP 中，encoder 通常用于将文本转换为固定长度的向量表示，这些表示捕捉了输入文本的关键信息。
+
+Encoder 的一些应用包括：
+
+序列到向量：将文本序列转换为固定大小的向量。
+特征提取：从原始数据中提取有用的特征。
+数据压缩：减少数据的维度，同时保留最重要的信息。
+
+Decoder 是一个将编码后的数据或表示转换回原始形式或另一种有用的形式的模块。在 NLP 中，decoder 通常用于生成文本，如在机器翻译或文本摘要任务中将编码后的向量转换回文本。
+
+Decoder 的一些应用包括：
+
+序列生成：从固定大小的向量生成文本序列。
+数据重建：从压缩的表示重建原始数据。
+翻译：将一种语言的文本转换为另一种语言的文本。
+
+#### 
 
 --- 
 欢迎各位同学。本课程中，各位将用Rust语言分阶段实现一个简单的大模型推理程序。

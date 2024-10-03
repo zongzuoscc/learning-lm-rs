@@ -103,10 +103,15 @@ pub fn rms_norm(y: &mut Tensor<f32>, x: &Tensor<f32>, w: &Tensor<f32>, epsilon: 
             // 当前序列的偏移量
             let offset = base + l * total_seq_len;
             // 平方和
-            let s: f32 = _x[offset..offset + total_seq_len]
-                .iter()
-                .map(|f| f * f)
-                .sum();
+            let mut s: f32 = 0.0; // 初始化 s 为 0.0
+            for i in offset..offset + total_seq_len {
+                // 假设 _x 是一个可以索引的集合，比如数组或向量
+                // 并假设 _x 的长度至少为 offset + total_seq_len
+                if i < _x.len() {
+                    let value = _x[i]; // 获取当前索引的值
+                    s += value * value; // 累加值的平方
+                }
+            }
             let sqrt = (s / total_seq_len as f32 + epsilon).sqrt();
             // 计算并储存结果
             for i in 0..total_seq_len {
